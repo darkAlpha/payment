@@ -1,0 +1,14 @@
+dubbo:
+  application:
+    logger: slf4j
+    name: PaymentGatewayApplication
+  registry:
+    address: zookeeper://${zookeeper.address:127.0.0.1}:2181
+  protocol:
+    name: tri
+    port: 50051
+  consumer:
+    loadbalance: roundrobin
+
+server:
+  port: 8082

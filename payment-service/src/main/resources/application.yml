@@ -1,0 +1,32 @@
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    name: orderdb
+    url: jdbc:mysql://localhost:3306/orderdb?serverTimezone=UTC
+    username: order
+    password: order
+dubbo:
+  application:
+    logger: slf4j
+    name: PaymentApplication
+  registry:
+    address: zookeeper://${zookeeper.address:127.0.0.1}:2181
+  protocol:
+    name: tri
+    port: 50051
+management:
+  metrics:
+    enabled: true
+  endpoints:
+    jmx:
+      exposure:
+        include: '*'
+    web:
+      base-path: /
+      exposure:
+        include: '*'
+  endpoint:
+    health:
+      show-details: always
+  server:
+    port: 7002
