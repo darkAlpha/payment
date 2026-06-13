@@ -1,3 +1,11 @@
+spring:
+  application:
+    name: payment-connector
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
 dubbo:
   application:
     logger: slf4j
@@ -10,5 +18,21 @@ dubbo:
   consumer:
     loadbalance: roundrobin
 
+# Payment platform configuration
+payment:
+  security:
+    jwt:
+      secret: ${JWT_SECRET:defaultSecretKeyForDevMustBeAtLeast256BitsLongForHS256Algorithm}
+      expiration-ms: 3600000
+  cache:
+    provider: caffeine
+  idempotency:
+    store: redis
+
 server:
-  port: 8082
+  port: 8080
+
+logging:
+  level:
+    org.tars: INFO
+    org.tars.core.security: DEBUG

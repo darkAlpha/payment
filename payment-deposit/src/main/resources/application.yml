@@ -1,0 +1,68 @@
+spring:
+  application:
+    name: payment-deposit
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/depositdb?serverTimezone=UTC
+    username: deposit
+    password: deposit
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+dubbo:
+  application:
+    logger: slf4j
+    name: payment-deposit
+  registry:
+    address: zookeeper://${zookeeper.address:127.0.0.1}:2181
+  protocol:
+    name: tri
+    port: 50053
+
+# Payment platform configuration
+payment:
+  idempotency:
+    store: redis          # redis | memory
+  cache:
+    provider: caffeine    # caffeine | redis
+  eod:
+    cron: "0 59 23 * * *" # Daily at 23:59
+  security:
+    jwt:
+      secret: ${JWT_SECRET:defaultSecretKeyForDevMustBeAtLeast256BitsLongForHS256Algorithm}
+      expiration-ms: 3600000
+
+# External service URLs
+customer:
+  service:
+    url: ${CUSTOMER_SERVICE_URL:http://localhost:8081}
+
+account:
+  service:
+    url: ${ACCOUNT_SERVICE_URL:http://localhost:8082}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: '*'
+  endpoint:
+    health:
+      show-details: always
+
+server:
+  port: 7003
+
+logging:
+  level:
+    org.tars.deposit: INFO
+    org.tars.core: DEBUG

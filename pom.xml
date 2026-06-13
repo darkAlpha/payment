@@ -20,6 +20,9 @@
         <module>payment-api</module>
         <module>payment-service</module>
         <module>payment-connector</module>
+        <module>payment-core</module>
+        <module>payment-gateway</module>
+        <module>payment-deposit</module>
     </modules>
 
     <dependencyManagement>
