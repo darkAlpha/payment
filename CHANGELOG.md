@@ -4,6 +4,46 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.0] - 2026-06-14
+
+### Added — payment-gateway module
+- **Netty-based API Gateway**
+  - High-performance non-blocking HTTP server using Netty 4.1
+  - Full filter chain architecture (Chain of Responsibility pattern)
+  - YAML-driven configuration (`gateway.yaml`)
+
+- **Load Balancing**
+  - Round-robin, weighted, random, least-connections, IP-hash strategies
+  - Pluggable strategy via `LoadBalancerFactory`
+  - Health-aware upstream selection
+
+- **API Security**
+  - JWT Bearer token validation with role extraction
+  - X-API-Key authentication with per-key roles and path restrictions
+  - RBAC (Role-Based Access Control) with path-level permissions
+  - CORS handling with preflight support
+
+- **Traffic Management**
+  - Rate limiting per-client and per-path (Resilience4j)
+  - Circuit breaker per-route with configurable thresholds
+  - Retry with exponential backoff
+  - Per-route request timeouts
+
+- **API Versioning**
+  - Header-based routing (`X-API-Version`)
+  - Percentage-based canary/blue-green deployments
+
+- **Feature Flags**
+  - Dynamic runtime feature toggle
+  - Role-based feature access
+  - Percentage-based rollout for gradual release
+
+- **Observability**
+  - Access logging with X-Request-Id correlation
+  - Request metrics (total, errors, latency, by status/path/method)
+  - Health endpoint with JVM info
+  - Route and feature flag introspection endpoints
+
 ## [0.2.0] - 2026-06-13
 
 ### Added
