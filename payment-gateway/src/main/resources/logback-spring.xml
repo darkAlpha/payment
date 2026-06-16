@@ -1,12 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
     <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
-
-    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
-        <encoder>
-            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
-        </encoder>
-    </appender>
+    <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
 
     <appender name="ACCESS" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>logs/gateway-access.log</file>
@@ -21,8 +16,6 @@
         <appender-ref ref="ACCESS"/>
         <appender-ref ref="CONSOLE"/>
     </logger>
-    <logger name="io.netty" level="WARN"/>
-    <logger name="org.tars.gateway" level="DEBUG"/>
 
     <root level="INFO">
         <appender-ref ref="CONSOLE"/>

@@ -4,9 +4,28 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.0] - 2026-06-16
+
+### Changed — payment-gateway (Spring Cloud Gateway refactor)
+- **Migrated from custom Netty to Spring Cloud Gateway**
+  - 42 files → 14 files (67% code reduction)
+  - Routes, CORS, retry, circuit breaker now YAML-declarative
+  - Load balancing via `lb://` URI scheme
+  - Health/metrics via Spring Boot Actuator
+  - Reactive Spring Security (`@EnableWebFluxSecurity`)
+
+- **Security** — JWT + API Key dual auth via `ServerAuthenticationConverter`
+- **Feature Flags** — `@ConditionalOnProperty` + REST API for toggle
+- **Rate Limiting** — Caffeine-backed `GlobalFilter`
+- **Circuit Breaker** — `spring-cloud-starter-circuitbreaker-reactor-resilience4j`
+- **Retry** — SCG built-in `Retry` filter with exponential backoff
+- **Version Routing** — `X-API-Version` header propagation filter
+- **Fallback Controller** — `/fallback/{service}` for circuit breaker
+- **Actuator endpoints** — `/actuator/gateway/routes`, `/actuator/health`
+
 ## [0.3.0] - 2026-06-14
 
-### Added — payment-gateway module
+### Added — payment-gateway module (custom Netty, superseded by 0.4.0)
 - **Netty-based API Gateway**
   - High-performance non-blocking HTTP server using Netty 4.1
   - Full filter chain architecture (Chain of Responsibility pattern)

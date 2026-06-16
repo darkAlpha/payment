@@ -1,119 +1,121 @@
-# Payment Gateway
+# Payment Gateway — Spring Cloud Gateway
 
-**High-performance Netty-based API Gateway** with Spring Boot integration.
+**Production-ready API Gateway** built on Spring Cloud Gateway (Netty + WebFlux).
+
+## Why Spring Cloud Gateway?
+
+| Custom Netty (before) | Spring Cloud Gateway (now) |
+|---|---|
+| 42 Java files, custom everything | **14 Java files** — framework handles the rest |
+| Manual Netty server + pipeline | SCG auto-configures Netty |
+| Custom proxy client | SCG built-in reverse proxy |
+| Custom route registry | `spring.cloud.gateway.routes` in YAML |
+| Custom filter chain | `GlobalFilter` + built-in `GatewayFilter` |
+| Custom circuit breaker wiring | `spring-cloud-starter-circuitbreaker-reactor-resilience4j` |
+| Custom retry logic | SCG `Retry` filter with backoff |
+| Custom load balancer | SCG `lb://` URI scheme |
+| Custom CORS handling | `spring.cloud.gateway.globalcors` |
+| Custom health/metrics | Spring Boot Actuator |
 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                 Payment Gateway (Spring Boot + Netty)              │
-├──────────────────────────────────────────────────────────────────┤
-│  ┌──────┐   ┌──────────┐   ┌──────┐   ┌──────────────────┐      │
-│  │ CORS │ → │Rate Limit│ → │ Auth │ → │  Authorization   │      │
-│  └──────┘   └──────────┘   └──────┘   └──────────────────┘      │
-│       │                                                           │
-│       ▼                                                           │
-│  ┌──────────┐  ┌──────────┐  ┌──────────────┐  ┌────────────┐   │
-│  │ Feature  │→ │ Version  │→ │Load Balancer │→ │   Proxy    │   │
-│  │  Flags   │  │ Routing  │  │  (5 strats)  │  │ + CB/Retry │   │
-│  └──────────┘  └──────────┘  └──────────────┘  └────────────┘   │
-├──────────────────────────────────────────────────────────────────┤
-│  Upstream Services: Deposit | Transfer | Account | Notification   │
-└──────────────────────────────────────────────────────────────────┘
+                         ┌─────────────────────────────┐
+                         │   Spring Cloud Gateway       │
+                         │   (Netty + WebFlux)          │
+Client ─── HTTPS ──────▶ ├─────────────────────────────┤
+                         │ GlobalFilter Pipeline:        │
+                         │  AccessLog → RateLimit →      │
+                         │  Security → FeatureFlag →     │
+                         │  VersionRouting → [Route] →   │
+                         │  CircuitBreaker → Retry →     │
+                         │  Proxy                        │
+                         ├──────────┬──────────┬─────────┤
+                         │ lb://    │ lb://    │ lb://   │
+                         │ deposit  │ transfer │ account │
+                         └──────────┴──────────┴─────────┘
 ```
-
-## Spring Boot Best Practices Applied
-
-| Practice | Implementation |
-|----------|---------------|
-| **`@ConfigurationProperties`** | Type-safe `GatewayProperties` with `@Validated` |
-| **Component Scanning** | All filters are `@Component` beans, auto-discovered |
-| **Conditional Beans** | `@ConditionalOnProperty` for rate-limit, feature-flags |
-| **Lifecycle Management** | `@EventListener(ApplicationReadyEvent)` + `@PreDestroy` |
-| **Bean Composition** | `@Configuration` classes wire LB strategies, registries |
-| **Spring Boot Testing** | `spring-boot-starter-test` with JUnit 5 + AssertJ |
-| **External Config** | `application.yaml` with Spring relaxed binding |
-| **Profiles** | `application-test.yaml` for isolated testing |
-| **Lombok** | `@Data`, `@Slf4j` for clean POJOs and logging |
 
 ## Features
 
-### 🔀 Load Balancing (5 strategies)
-- `round-robin` — even distribution
-- `weighted` — proportional to weight
-- `random` — random selection
-- `least-connections` — routes to least-busy
-- `ip-hash` — consistent hashing (sticky sessions)
+### Built-in (Spring Cloud Gateway)
+- ✅ **Reverse Proxy** — automatic request forwarding via Netty
+- ✅ **Route Matching** — path, method, header predicates in YAML
+- ✅ **Circuit Breaker** — Resilience4j per-route with fallback
+- ✅ **Retry** — configurable retries with exponential backoff
+- ✅ **Load Balancing** — `lb://service-name` with Spring Cloud LoadBalancer
+- ✅ **CORS** — declarative in `application.yaml`
+- ✅ **Health/Metrics** — Spring Boot Actuator + Gateway endpoints
+- ✅ **Rate Limiting** — built-in `RequestRateLimiter` or custom filter
 
-### 🔐 Security
-- **JWT** (`Authorization: Bearer <token>`) with role extraction
-- **API Key** (`X-API-Key`) with per-key roles + path restrictions
-- **RBAC** — role-based path access (ADMIN, OPERATOR, VIEWER, SERVICE)
-- **CORS** — configurable cross-origin support
+### Custom (our code)
+- 🔐 **JWT + API Key Security** — reactive Spring Security with dual auth
+- 🚩 **Feature Flags** — dynamic toggle with role + percentage gating
+- 🏷️ **Version Routing** — `X-API-Version` header propagation
+- 📝 **Access Logging** — structured request/response logging
+- ⚡ **Rate Limiting** — Caffeine-backed token bucket filter
+- 🛡️ **Error Handling** — consistent JSON error responses
 
-### 🚦 Traffic Control
-- **Rate Limiting** — Resilience4j per-client/path
-- **Circuit Breaker** — per-route with configurable thresholds
-- **Retry** — exponential backoff
-- **Timeouts** — per-route configurable
+## Endpoints
 
-### 🏷️ API Versioning
-- **Header** — `X-API-Version: v2`
-- **Percentage** — canary deploys (v1=80%, v2=20%)
+| Path | Source | Description |
+|------|--------|-------------|
+| `/actuator/health` | Actuator | Health check |
+| `/actuator/gateway/routes` | SCG | All registered routes |
+| `/actuator/gateway/globalfilters` | SCG | Active global filters |
+| `/actuator/metrics` | Actuator | Application metrics |
+| `/gateway/features` | Custom | Feature flag status + toggle |
+| `/fallback/{service}` | Custom | Circuit breaker fallback |
 
-### 🚩 Feature Flags
-- Enable/disable at runtime
-- Role-gated + percentage rollout
-- `@ConditionalOnProperty` toggleable
+## Configuration
 
-### 📊 Observability
-- Access log with request ID correlation
-- `/gateway/health` — JVM + uptime info
-- `/gateway/metrics` — request counts, latency, error rates
-- `/gateway/features` — flag status
-- `/gateway/routes` — registered routes
-
-## Configuration (`application.yaml`)
+All routing is in `application.yaml` — no Java code needed for routes:
 
 ```yaml
-gateway:
-  server:
-    port: 8080
-    boss-threads: 1
-    worker-threads: 0  # auto
+spring:
+  cloud:
+    gateway:
+      routes:
+        - id: deposit-service
+          uri: lb://deposit-service            # load-balanced
+          predicates:
+            - Path=/api/v1/deposits/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: deposit-cb
+                fallbackUri: forward:/fallback/deposit
+            - name: Retry
+              args:
+                retries: 3
+                backoff:
+                  firstBackoff: 100ms
+                  maxBackoff: 5s
+          metadata:
+            required-roles: OPERATOR,ADMIN
 
+gateway:
   security:
     jwt:
       enabled: true
       secret: "your-256-bit-secret-key"
     api-key:
-      enabled: true
       keys:
-        your-key-here:
+        your-key:
           name: service-name
           roles: [OPERATOR]
-          allowed-paths: ["/api/**"]
     public-paths:
-      - /health
+      - /actuator/**
       - /api/v1/auth/**
 
-  routes:
-    - id: deposit-service
-      path: /api/v1/deposits/**
-      load-balancer: round-robin
-      required-roles: [OPERATOR, ADMIN]
-      timeout-ms: 30000
-      retries: 2
-      upstreams:
-        - url: http://localhost:8081
-          weight: 3
-          version: v1
-      versioning:
-        strategy: percentage
-        percentages: { v1: 80, v2: 20 }
-      circuit-breaker:
-        failure-rate-threshold: 50
-        sliding-window-size: 10
+  feature-flags:
+    flags:
+      deposits: { enabled: true, percentage: 100 }
+      new-feature: { enabled: false }
+
+  rate-limit:
+    enabled: true
+    requests-per-minute: 100
 ```
 
 ## Running
@@ -125,64 +127,13 @@ mvn clean package -pl payment-gateway -DskipTests
 # Run
 java -jar payment-gateway/target/payment-gateway-0.0.1-SNAPSHOT.jar
 
-# With profile
-java -jar target/*.jar --spring.profiles.active=prod
-```
-
-## Testing
-
-```bash
+# Test
 mvn test -pl payment-gateway
 
-# Manual testing
-curl localhost:8080/health
-curl -H "X-API-Key: pk_live_deposit_service_2024" localhost:8080/api/v1/deposits
-curl -H "Authorization: Bearer <token>" -H "X-API-Version: v2" localhost:8080/api/v1/deposits
-```
-
-## Filter Chain (ordered)
-
-| Order | Filter | Condition |
-|-------|--------|-----------|
-| -100 | CorsFilter | always |
-| -50 | RequestIdFilter | always |
-| 0 | AccessLogFilter | `access-log-enabled=true` |
-| 100 | RateLimitFilter | `rate-limit.enabled=true` |
-| 200 | AuthenticationFilter | always (skips public paths) |
-| 300 | AuthorizationFilter | always |
-| 400 | FeatureFlagFilter | `feature-flags.enabled=true` |
-| 700 | RouteResolveFilter | always |
-| 900 | ProxyFilter | always |
-
-## Adding a Custom Filter
-
-```java
-@Component
-public class MyFilter implements GatewayFilter {
-    @Override public String getName() { return "my-filter"; }
-    @Override public int getOrder() { return 350; }
-
-    @Override
-    public void filter(GatewayContext context, GatewayFilterChain chain) {
-        // pre-logic
-        chain.next(context);
-        // post-logic
-    }
-}
-```
-
-## Adding a Custom Load Balancer
-
-```java
-// 1. Implement strategy
-public class MyLbStrategy implements LoadBalancerStrategy { ... }
-
-// 2. Register as bean in LoadBalancerConfiguration
-@Bean
-public MyLbStrategy myLbStrategy() { return new MyLbStrategy(); }
-
-// 3. Use in route config
-gateway.routes[0].load-balancer=my-strategy
+# curl
+curl localhost:8080/actuator/health
+curl -H "X-API-Key: pk_live_admin_2024" localhost:8080/api/v1/deposits
+curl -H "Authorization: Bearer <jwt>" localhost:8080/api/v1/deposits
 ```
 
 ## Project Structure
@@ -191,31 +142,37 @@ gateway.routes[0].load-balancer=my-strategy
 src/main/java/org/tars/gateway/
 ├── GatewayApplication.java              @SpringBootApplication
 ├── config/
-│   ├── GatewayProperties.java           @ConfigurationProperties
-│   ├── GatewayConfiguration.java        @Configuration (core beans)
-│   └── LoadBalancerConfiguration.java   @Configuration (LB beans)
-├── server/
-│   ├── NettyGatewayServer.java          @Component (lifecycle)
-│   ├── GatewayChannelInitializer.java   Netty pipeline
-│   └── GatewayRequestHandler.java       Request dispatch
-├── context/
-│   └── GatewayContext.java              Per-request state
-├── filter/
-│   ├── GatewayFilter.java              Interface
-│   ├── GatewayFilterChain.java         Chain executor
-│   ├── FilterOrder.java                Constants
-│   ├── pre/                            @Component filters
-│   └── post/                           @Component filters
+│   ├── GatewayConfig.java               @Configuration
+│   ├── GatewaySecurityProperties.java   @ConfigurationProperties
+│   └── FeatureFlagProperties.java       @ConfigurationProperties
 ├── security/
-│   ├── AuthenticationResult.java       Record
-│   ├── jwt/JwtAuthProvider.java        @Component
-│   ├── apikey/ApiKeyAuthProvider.java  @Component
-│   └── rbac/RbacService.java          Bean
-├── loadbalancer/                       Strategy pattern
-├── versioning/                         Header + Percentage
-├── feature/FeatureFlagService.java     Bean
-├── proxy/                              Netty HTTP client
-├── metrics/MetricsService.java         @Service
-├── health/HealthService.java           @Service
-└── exception/GatewayException.java
+│   ├── JwtService.java                  @Service — JWT validation/generation
+│   └── SecurityConfig.java             @EnableWebFluxSecurity — JWT + API key
+├── filter/
+│   ├── AccessLogFilter.java             GlobalFilter — request logging
+│   ├── FeatureFlagFilter.java           GlobalFilter — feature gating
+│   ├── VersionRoutingFilter.java        GlobalFilter — X-API-Version
+│   ├── RateLimitFilter.java             GlobalFilter — Caffeine token bucket
+│   └── FallbackController.java          Circuit breaker fallback
+├── feature/
+│   ├── FeatureFlagService.java          @Service — flag management
+│   └── FeatureFlagController.java       @RestController — CRUD
+└── exception/
+    └── GatewayExceptionHandler.java     ErrorWebExceptionHandler
+```
+
+## Docker
+
+```yaml
+# docker-compose.yaml addition
+payment-gateway:
+  build:
+    context: .
+    dockerfile: payment-gateway/Dockerfile
+  ports:
+    - "8080:8080"
+  environment:
+    - SPRING_PROFILES_ACTIVE=docker
+  depends_on:
+    - zookeeper
 ```
