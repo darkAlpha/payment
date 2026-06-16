@@ -1,92 +1,84 @@
 package org.tars.gateway.filter.pre;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.tars.gateway.config.GatewayConfig;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+import org.tars.gateway.config.GatewayProperties;
 import org.tars.gateway.context.GatewayContext;
 import org.tars.gateway.filter.FilterOrder;
 import org.tars.gateway.filter.GatewayFilter;
 import org.tars.gateway.filter.GatewayFilterChain;
-import org.tars.gateway.loadbalancer.LoadBalancerFactory;
+import org.tars.gateway.loadbalancer.LoadBalancerRegistry;
 import org.tars.gateway.loadbalancer.LoadBalancerStrategy;
+import org.tars.gateway.route.RouteRegistry;
 import org.tars.gateway.versioning.VersionRouter;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
- * Route resolution and load balancing filter.
- * Resolves the target upstream based on version routing and load balancing strategy.
+ * Resolves route → applies versioning → load-balances to an upstream.
  */
+@Slf4j
+@Component
 public class RouteResolveFilter implements GatewayFilter {
 
-    private static final Logger log = LoggerFactory.getLogger(RouteResolveFilter.class);
-
+    private final RouteRegistry routeRegistry;
     private final VersionRouter versionRouter;
+    private final LoadBalancerRegistry lbRegistry;
 
-    public RouteResolveFilter(VersionRouter versionRouter) {
+    public RouteResolveFilter(RouteRegistry routeRegistry, VersionRouter versionRouter,
+                              LoadBalancerRegistry lbRegistry) {
+        this.routeRegistry = routeRegistry;
         this.versionRouter = versionRouter;
+        this.lbRegistry = lbRegistry;
     }
 
-    @Override
-    public String name() {
-        return "route-resolve";
-    }
-
-    @Override
-    public int order() {
-        return FilterOrder.LOAD_BALANCE;
-    }
+    @Override public String getName() { return "route-resolve"; }
+    @Override public int getOrder() { return FilterOrder.LOAD_BALANCE; }
 
     @Override
     public void filter(GatewayContext context, GatewayFilterChain chain) {
-        GatewayConfig.RouteConfig route = context.getAttribute("matched-route");
-        if (route == null) {
-            context.abort(404, "No route matched for: " + context.getMethod() + " " + context.getPath());
+        Optional<GatewayProperties.Route> matched = routeRegistry.match(context.getMethod(), context.getPath());
+        if (matched.isEmpty()) {
+            context.abort(404, "No route for: " + context.getMethod() + " " + context.getPath());
             return;
         }
 
-        List<GatewayConfig.UpstreamConfig> upstreams = route.getUpstreams();
+        GatewayProperties.Route route = matched.get();
+        context.setAttribute("matched-route", route);
+
+        List<GatewayProperties.Upstream> upstreams = route.getUpstreams();
         if (upstreams == null || upstreams.isEmpty()) {
-            context.abort(503, "No upstreams configured for route: " + route.getId());
+            context.abort(503, "No upstreams for route: " + route.getId());
             return;
         }
 
-        // Apply version routing
-        List<GatewayConfig.UpstreamConfig> versionedUpstreams = versionRouter.resolveUpstreams(context, route, upstreams);
+        // Version routing
+        List<GatewayProperties.Upstream> resolved = versionRouter.resolve(context, route);
 
-        // Apply load balancing
-        try {
-            LoadBalancerStrategy strategy = LoadBalancerFactory.get(route.getLoadBalancer());
-            String clientIp = context.getHeader("X-Forwarded-For");
-            GatewayConfig.UpstreamConfig selected = strategy.select(versionedUpstreams, clientIp);
+        // Load balance
+        LoadBalancerStrategy strategy = lbRegistry.get(route.getLoadBalancer());
+        String clientKey = context.getHeader("X-Forwarded-For");
+        GatewayProperties.Upstream selected = strategy.select(resolved, clientKey);
 
-            String targetUrl = buildTargetUrl(selected.getUrl(), context.getPath(), route);
-            context.setResolvedUpstream(targetUrl);
+        String targetUrl = buildTargetUrl(selected.getUrl(), context.getPath(), route);
+        context.setResolvedUpstream(targetUrl);
 
-            log.debug("Request {} routed to: {} (strategy={}, version={})",
-                    context.getRequestId(), targetUrl, strategy.name(), selected.getVersion());
-
-        } catch (IllegalStateException e) {
-            log.error("Load balancing failed for route {}: {}", route.getId(), e.getMessage());
-            context.abort(503, "No healthy upstream available");
-            return;
-        }
-
+        log.debug("[{}] Routed to {} via {}", context.getRequestId(), targetUrl, strategy.getName());
         chain.next(context);
     }
 
-    private String buildTargetUrl(String upstreamUrl, String path, GatewayConfig.RouteConfig route) {
+    private String buildTargetUrl(String baseUrl, String path, GatewayProperties.Route route) {
         String targetPath = path;
-        if (route.isStripPrefix() && route.getPath() != null) {
-            String prefix = route.getPath().replace("/**", "").replace("/*", "");
+        if (route.isStripPrefix()) {
+            String prefix = route.getPath().replaceAll("/\\*\\*$", "").replaceAll("/\\*$", "");
             if (path.startsWith(prefix)) {
                 targetPath = path.substring(prefix.length());
                 if (!targetPath.startsWith("/")) targetPath = "/" + targetPath;
             }
         }
-
-        String baseUrl = upstreamUrl.endsWith("/") ? upstreamUrl.substring(0, upstreamUrl.length() - 1) : upstreamUrl;
-        return baseUrl + targetPath;
+        String base = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+        return base + targetPath;
     }
 }
 

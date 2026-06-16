@@ -1,11 +1,12 @@
 package org.tars.gateway.context;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 
 /**
- * Gateway request context - carries all request metadata through the filter chain.
- * Thread-safe per request lifecycle.
+ * Immutable request context carrying all state through the filter pipeline.
+ * Each request gets its own context instance.
  */
 public class GatewayContext {
 
@@ -13,20 +14,19 @@ public class GatewayContext {
     private final Instant startTime;
     private final String method;
     private final String path;
-    private final String originalPath;
     private final Map<String, String> headers;
     private final Map<String, String> queryParams;
     private final byte[] body;
 
-    // Mutable state
+    // Mutable routing state
     private String resolvedUpstream;
     private String authenticatedSubject;
     private Set<String> roles = new HashSet<>();
-    private Map<String, Object> attributes = new HashMap<>();
+    private final Map<String, Object> attributes = new HashMap<>();
     private int responseStatus = 200;
     private byte[] responseBody;
-    private Map<String, String> responseHeaders = new HashMap<>();
-    private boolean aborted = false;
+    private final Map<String, String> responseHeaders = new LinkedHashMap<>();
+    private boolean aborted;
     private String abortReason;
 
     public GatewayContext(String requestId, String method, String path,
@@ -35,17 +35,16 @@ public class GatewayContext {
         this.startTime = Instant.now();
         this.method = method;
         this.path = path;
-        this.originalPath = path;
-        this.headers = headers != null ? new HashMap<>(headers) : new HashMap<>();
-        this.queryParams = queryParams != null ? new HashMap<>(queryParams) : new HashMap<>();
+        this.headers = new LinkedHashMap<>(headers != null ? headers : Map.of());
+        this.queryParams = new LinkedHashMap<>(queryParams != null ? queryParams : Map.of());
         this.body = body;
     }
 
+    // --- Getters ---
     public String getRequestId() { return requestId; }
     public Instant getStartTime() { return startTime; }
     public String getMethod() { return method; }
     public String getPath() { return path; }
-    public String getOriginalPath() { return originalPath; }
     public Map<String, String> getHeaders() { return headers; }
     public Map<String, String> getQueryParams() { return queryParams; }
     public byte[] getBody() { return body; }
@@ -54,33 +53,33 @@ public class GatewayContext {
         return headers.entrySet().stream()
                 .filter(e -> e.getKey().equalsIgnoreCase(name))
                 .map(Map.Entry::getValue)
-                .findFirst()
-                .orElse(null);
+                .findFirst().orElse(null);
     }
 
+    // --- Routing ---
     public String getResolvedUpstream() { return resolvedUpstream; }
-    public void setResolvedUpstream(String resolvedUpstream) { this.resolvedUpstream = resolvedUpstream; }
+    public void setResolvedUpstream(String url) { this.resolvedUpstream = url; }
 
+    // --- Security ---
     public String getAuthenticatedSubject() { return authenticatedSubject; }
-    public void setAuthenticatedSubject(String authenticatedSubject) { this.authenticatedSubject = authenticatedSubject; }
-
+    public void setAuthenticatedSubject(String subject) { this.authenticatedSubject = subject; }
     public Set<String> getRoles() { return roles; }
     public void setRoles(Set<String> roles) { this.roles = roles; }
-    public void addRole(String role) { this.roles.add(role); }
 
+    // --- Attributes ---
     @SuppressWarnings("unchecked")
     public <T> T getAttribute(String key) { return (T) attributes.get(key); }
     public void setAttribute(String key, Object value) { attributes.put(key, value); }
 
+    // --- Response ---
     public int getResponseStatus() { return responseStatus; }
-    public void setResponseStatus(int responseStatus) { this.responseStatus = responseStatus; }
-
+    public void setResponseStatus(int status) { this.responseStatus = status; }
     public byte[] getResponseBody() { return responseBody; }
-    public void setResponseBody(byte[] responseBody) { this.responseBody = responseBody; }
-
+    public void setResponseBody(byte[] body) { this.responseBody = body; }
     public Map<String, String> getResponseHeaders() { return responseHeaders; }
     public void addResponseHeader(String key, String value) { responseHeaders.put(key, value); }
 
+    // --- Abort ---
     public boolean isAborted() { return aborted; }
     public String getAbortReason() { return abortReason; }
 
@@ -91,7 +90,7 @@ public class GatewayContext {
     }
 
     public long getElapsedMs() {
-        return java.time.Duration.between(startTime, Instant.now()).toMillis();
+        return Duration.between(startTime, Instant.now()).toMillis();
     }
 }
 

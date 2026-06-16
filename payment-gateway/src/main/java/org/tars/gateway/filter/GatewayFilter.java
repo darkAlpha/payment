@@ -3,25 +3,18 @@ package org.tars.gateway.filter;
 import org.tars.gateway.context.GatewayContext;
 
 /**
- * Gateway filter interface - implements Chain of Responsibility pattern.
- * Each filter can inspect/modify the request before and after proxying.
+ * Gateway filter contract following Spring's Ordered pattern.
+ * Implementations should be Spring components.
  */
 public interface GatewayFilter {
 
-    /**
-     * Filter name for identification and ordering.
-     */
-    String name();
+    /** Unique filter name. */
+    String getName();
 
-    /**
-     * Filter execution order. Lower values execute first.
-     */
-    int order();
+    /** Execution order — lower runs first. */
+    int getOrder();
 
-    /**
-     * Execute filter logic. Call chain.next() to continue processing.
-     * Modify context to abort the request.
-     */
+    /** Execute filter logic; call chain.next() to proceed. */
     void filter(GatewayContext context, GatewayFilterChain chain);
 }
 

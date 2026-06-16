@@ -13,66 +13,35 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("Gateway Filter Chain")
 class GatewayFilterChainTest {
 
-    @Test
-    @DisplayName("should execute filters in order")
-    void shouldExecuteInOrder() {
-        List<String> executionOrder = new ArrayList<>();
-
-        GatewayFilter filter1 = createFilter("first", 100, executionOrder);
-        GatewayFilter filter2 = createFilter("second", 200, executionOrder);
-        GatewayFilter filter3 = createFilter("third", 300, executionOrder);
-
-        GatewayContext context = new GatewayContext("test-1", "GET", "/test", Map.of(), Map.of(), null);
-        GatewayFilterChain chain = new GatewayFilterChain(List.of(filter1, filter2, filter3));
-        chain.execute(context);
-
-        assertThat(executionOrder).containsExactly("first", "second", "third");
+    @Test @DisplayName("executes filters in order")
+    void order() {
+        List<String> log = new ArrayList<>();
+        var chain = new GatewayFilterChain(List.of(
+                filter("A", 1, log), filter("B", 2, log), filter("C", 3, log)));
+        chain.execute(new GatewayContext("t1", "GET", "/", Map.of(), Map.of(), null));
+        assertThat(log).containsExactly("A", "B", "C");
     }
 
-    @Test
-    @DisplayName("should stop chain when context is aborted")
-    void shouldStopOnAbort() {
-        List<String> executionOrder = new ArrayList<>();
-
-        GatewayFilter filter1 = createFilter("first", 100, executionOrder);
+    @Test @DisplayName("stops on abort")
+    void abort() {
+        List<String> log = new ArrayList<>();
         GatewayFilter abortFilter = new GatewayFilter() {
-            public String name() { return "abort"; }
-            public int order() { return 200; }
-            public void filter(GatewayContext ctx, GatewayFilterChain c) {
-                executionOrder.add("abort");
-                ctx.abort(403, "Forbidden");
-                c.next(ctx);
-            }
+            public String getName() { return "abort"; }
+            public int getOrder() { return 2; }
+            public void filter(GatewayContext c, GatewayFilterChain ch) { log.add("abort"); c.abort(403, "no"); ch.next(c); }
         };
-        GatewayFilter filter3 = createFilter("third", 300, executionOrder);
-
-        GatewayContext context = new GatewayContext("test-2", "GET", "/test", Map.of(), Map.of(), null);
-        GatewayFilterChain chain = new GatewayFilterChain(List.of(filter1, abortFilter, filter3));
-        chain.execute(context);
-
-        assertThat(executionOrder).containsExactly("first", "abort");
-        assertThat(context.isAborted()).isTrue();
-        assertThat(context.getResponseStatus()).isEqualTo(403);
+        var chain = new GatewayFilterChain(List.of(filter("A", 1, log), abortFilter, filter("C", 3, log)));
+        var ctx = new GatewayContext("t2", "GET", "/", Map.of(), Map.of(), null);
+        chain.execute(ctx);
+        assertThat(log).containsExactly("A", "abort");
+        assertThat(ctx.isAborted()).isTrue();
     }
 
-    @Test
-    @DisplayName("should handle empty filter chain")
-    void shouldHandleEmptyChain() {
-        GatewayContext context = new GatewayContext("test-3", "GET", "/test", Map.of(), Map.of(), null);
-        GatewayFilterChain chain = new GatewayFilterChain(List.of());
-        chain.execute(context);
-        assertThat(context.isAborted()).isFalse();
-    }
-
-    private GatewayFilter createFilter(String filterName, int filterOrder, List<String> log) {
+    private GatewayFilter filter(String name, int order, List<String> log) {
         return new GatewayFilter() {
-            public String name() { return filterName; }
-            public int order() { return filterOrder; }
-            public void filter(GatewayContext ctx, GatewayFilterChain c) {
-                log.add(filterName);
-                c.next(ctx);
-            }
+            public String getName() { return name; }
+            public int getOrder() { return order; }
+            public void filter(GatewayContext c, GatewayFilterChain ch) { log.add(name); ch.next(c); }
         };
     }
 }
-

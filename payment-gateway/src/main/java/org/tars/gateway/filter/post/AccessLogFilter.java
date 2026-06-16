@@ -1,53 +1,43 @@
 package org.tars.gateway.filter.post;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+import org.tars.gateway.config.GatewayProperties;
 import org.tars.gateway.context.GatewayContext;
 import org.tars.gateway.filter.FilterOrder;
 import org.tars.gateway.filter.GatewayFilter;
 import org.tars.gateway.filter.GatewayFilterChain;
+import org.tars.gateway.metrics.MetricsService;
 
 /**
- * Access log filter - logs request/response details for auditing.
+ * Access log filter — logs request lifecycle.
  */
+@Slf4j
+@Component
 public class AccessLogFilter implements GatewayFilter {
 
-    private static final Logger accessLog = LoggerFactory.getLogger("gateway.access");
-
+    private static final org.slf4j.Logger ACCESS = org.slf4j.LoggerFactory.getLogger("gateway.access");
     private final boolean enabled;
 
-    public AccessLogFilter(boolean enabled) {
-        this.enabled = enabled;
+    public AccessLogFilter(GatewayProperties properties) {
+        this.enabled = properties.getServer().isAccessLogEnabled();
     }
 
-    @Override
-    public String name() {
-        return "access-log";
-    }
-
-    @Override
-    public int order() {
-        return FilterOrder.ACCESS_LOG;
-    }
+    @Override public String getName() { return "access-log"; }
+    @Override public int getOrder() { return FilterOrder.ACCESS_LOG; }
 
     @Override
     public void filter(GatewayContext context, GatewayFilterChain chain) {
-        long startNanos = System.nanoTime();
-
-        // Continue chain
         chain.next(context);
 
-        // Log after response
         if (enabled) {
-            long durationMs = (System.nanoTime() - startNanos) / 1_000_000;
-            accessLog.info("{} | {} {} | {} | {}ms | {} | upstream={}",
+            ACCESS.info("{} | {} {} | {} | {}ms | {} | upstream={}",
                     context.getRequestId(),
-                    context.getMethod(),
-                    context.getPath(),
+                    context.getMethod(), context.getPath(),
                     context.getResponseStatus(),
-                    durationMs,
-                    context.getAuthenticatedSubject() != null ? context.getAuthenticatedSubject() : "anonymous",
-                    context.getResolvedUpstream() != null ? context.getResolvedUpstream() : "N/A");
+                    context.getElapsedMs(),
+                    context.getAuthenticatedSubject() != null ? context.getAuthenticatedSubject() : "anon",
+                    context.getResolvedUpstream() != null ? context.getResolvedUpstream() : "-");
         }
     }
 }

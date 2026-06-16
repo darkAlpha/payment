@@ -2,9 +2,10 @@ package org.tars.gateway.filter.pre;
 
 import io.github.resilience4j.ratelimiter.RateLimiter;
 import io.github.resilience4j.ratelimiter.RateLimiterConfig;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.tars.gateway.config.GatewayConfig;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.stereotype.Component;
+import org.tars.gateway.config.GatewayProperties;
 import org.tars.gateway.context.GatewayContext;
 import org.tars.gateway.filter.FilterOrder;
 import org.tars.gateway.filter.GatewayFilter;
@@ -16,81 +17,61 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Rate limiting filter using Resilience4j.
- * Limits requests per client/path based on configuration.
+ * Conditionally enabled via gateway.rate-limit.enabled=true.
  */
+@Slf4j
+@Component
+@ConditionalOnProperty(prefix = "gateway.rate-limit", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class RateLimitFilter implements GatewayFilter {
 
-    private static final Logger log = LoggerFactory.getLogger(RateLimitFilter.class);
-
-    private final GatewayConfig.RateLimitConfig config;
+    private final GatewayProperties.RateLimit config;
     private final Map<String, RateLimiter> limiters = new ConcurrentHashMap<>();
 
-    public RateLimitFilter(GatewayConfig.RateLimitConfig config) {
-        this.config = config;
+    public RateLimitFilter(GatewayProperties properties) {
+        this.config = properties.getRateLimit();
     }
 
-    @Override
-    public String name() {
-        return "rate-limit";
-    }
-
-    @Override
-    public int order() {
-        return FilterOrder.RATE_LIMIT;
-    }
+    @Override public String getName() { return "rate-limit"; }
+    @Override public int getOrder() { return FilterOrder.RATE_LIMIT; }
 
     @Override
     public void filter(GatewayContext context, GatewayFilterChain chain) {
-        if (!config.isEnabled()) {
-            chain.next(context);
-            return;
-        }
-
         String key = resolveKey(context);
         int limit = resolveLimit(context.getPath());
-        RateLimiter limiter = getOrCreateLimiter(key, limit);
+        RateLimiter limiter = getOrCreate(key, limit);
 
         if (limiter.acquirePermission()) {
             chain.next(context);
         } else {
-            log.warn("Rate limit exceeded for key: {} on path: {}", key, context.getPath());
-            context.abort(429, "Rate limit exceeded. Try again later.");
+            log.warn("[{}] Rate limit exceeded: key={}", context.getRequestId(), key);
             context.addResponseHeader("Retry-After", "60");
             context.addResponseHeader("X-RateLimit-Limit", String.valueOf(limit));
-            context.addResponseHeader("X-RateLimit-Remaining", "0");
+            context.abort(429, "Rate limit exceeded");
         }
     }
 
-    private String resolveKey(GatewayContext context) {
-        // Use authenticated subject if available, otherwise use a general key
-        String subject = context.getAuthenticatedSubject();
-        if (subject != null) return subject;
-
-        String clientIp = context.getHeader("X-Forwarded-For");
-        if (clientIp != null) return clientIp.split(",")[0].trim();
-
+    private String resolveKey(GatewayContext ctx) {
+        if (ctx.getAuthenticatedSubject() != null) return ctx.getAuthenticatedSubject();
+        String forwarded = ctx.getHeader("X-Forwarded-For");
+        if (forwarded != null) return forwarded.split(",")[0].trim();
         return "anonymous";
     }
 
     private int resolveLimit(String path) {
-        // Check path-specific limits
-        for (Map.Entry<String, Integer> entry : config.getPathLimits().entrySet()) {
-            if (path.startsWith(entry.getKey())) {
-                return entry.getValue();
-            }
-        }
-        return config.getDefaultRpm();
+        return config.getPathLimits().entrySet().stream()
+                .filter(e -> path.startsWith(e.getKey()))
+                .map(Map.Entry::getValue)
+                .findFirst()
+                .orElse(config.getDefaultRpm());
     }
 
-    private RateLimiter getOrCreateLimiter(String key, int limit) {
-        return limiters.computeIfAbsent(key, k -> {
-            RateLimiterConfig rateLimiterConfig = RateLimiterConfig.custom()
-                    .limitForPeriod(limit)
-                    .limitRefreshPeriod(Duration.ofMinutes(1))
-                    .timeoutDuration(Duration.ZERO)
-                    .build();
-            return RateLimiter.of(k, rateLimiterConfig);
-        });
+    private RateLimiter getOrCreate(String key, int limit) {
+        return limiters.computeIfAbsent(key, k -> RateLimiter.of(k,
+                RateLimiterConfig.custom()
+                        .limitForPeriod(limit)
+                        .limitRefreshPeriod(Duration.ofMinutes(1))
+                        .timeoutDuration(Duration.ZERO)
+                        .build()));
     }
 }
 

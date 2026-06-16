@@ -1,44 +1,20 @@
 package org.tars.gateway.loadbalancer;
 
-import org.tars.gateway.config.GatewayConfig;
-
-import java.util.ArrayList;
+import org.tars.gateway.config.GatewayProperties;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
-/**
- * Weighted load balancing strategy.
- * Higher weight = more traffic to that upstream.
- */
 public class WeightedStrategy implements LoadBalancerStrategy {
+    @Override public String getName() { return "weighted"; }
 
     @Override
-    public String name() {
-        return "weighted";
-    }
-
-    @Override
-    public GatewayConfig.UpstreamConfig select(List<GatewayConfig.UpstreamConfig> upstreams, String key) {
-        List<GatewayConfig.UpstreamConfig> healthy = upstreams.stream()
-                .filter(GatewayConfig.UpstreamConfig::isHealthy)
-                .toList();
-
-        if (healthy.isEmpty()) {
-            throw new IllegalStateException("No healthy upstreams available");
-        }
-
-        int totalWeight = healthy.stream().mapToInt(GatewayConfig.UpstreamConfig::getWeight).sum();
-        int random = ThreadLocalRandom.current().nextInt(totalWeight);
-
-        int cumulative = 0;
-        for (GatewayConfig.UpstreamConfig upstream : healthy) {
-            cumulative += upstream.getWeight();
-            if (random < cumulative) {
-                return upstream;
-            }
-        }
-
+    public GatewayProperties.Upstream select(List<GatewayProperties.Upstream> upstreams, String key) {
+        List<GatewayProperties.Upstream> healthy = upstreams.stream().filter(GatewayProperties.Upstream::isHealthy).toList();
+        if (healthy.isEmpty()) throw new IllegalStateException("No healthy upstreams");
+        int total = healthy.stream().mapToInt(GatewayProperties.Upstream::getWeight).sum();
+        int rand = ThreadLocalRandom.current().nextInt(total);
+        int cum = 0;
+        for (var u : healthy) { cum += u.getWeight(); if (rand < cum) return u; }
         return healthy.getLast();
     }
 }
-

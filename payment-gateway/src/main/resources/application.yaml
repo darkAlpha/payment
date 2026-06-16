@@ -1,0 +1,134 @@
+spring:
+  application:
+    name: payment-gateway
+
+gateway:
+  server:
+    port: 8080
+    boss-threads: 1
+    worker-threads: 0
+    max-content-length: 10485760
+    idle-timeout-seconds: 60
+    access-log-enabled: true
+
+  security:
+    jwt:
+      enabled: true
+      secret: "payment-gateway-secret-key-must-be-at-least-256-bits-long-for-hs256"
+      issuer: payment-gateway
+      expiration-ms: 3600000
+      header-name: Authorization
+      token-prefix: "Bearer "
+    api-key:
+      enabled: true
+      header-name: X-API-Key
+      keys:
+        pk_live_deposit_service_2024:
+          name: deposit-service
+          roles: [SERVICE, OPERATOR]
+          allowed-paths: ["/api/**"]
+          rate-limit: 5000
+        pk_live_admin_2024:
+          name: admin-console
+          roles: [ADMIN]
+          allowed-paths: ["/**"]
+          rate-limit: 1000
+    cors:
+      enabled: true
+      allowed-origins: ["*"]
+      allowed-methods: [GET, POST, PUT, DELETE, PATCH, OPTIONS]
+      allowed-headers: ["*"]
+      allow-credentials: false
+      max-age: 3600
+    public-paths:
+      - /health
+      - /gateway/health
+      - /gateway/metrics
+      - /api/v1/auth/**
+
+  rate-limit:
+    enabled: true
+    default-rpm: 100
+    path-limits:
+      /api/v1/deposits: 50
+      /api/v1/transfers: 30
+
+  feature-flags:
+    enabled: true
+    flags:
+      deposits:
+        enabled: true
+        description: Deposit operations
+        percentage: 100
+      transfers:
+        enabled: true
+        description: Transfer operations
+        percentage: 100
+      eod:
+        enabled: true
+        description: EOD accrual
+        allowed-roles: [ADMIN, SERVICE]
+        percentage: 100
+
+  routes:
+    - id: deposit-service
+      path: /api/v1/deposits/**
+      method: "*"
+      load-balancer: round-robin
+      required-roles: [OPERATOR, ADMIN, SERVICE]
+      timeout-ms: 30000
+      retries: 2
+      upstreams:
+        - url: http://localhost:8081
+          weight: 3
+          version: v1
+        - url: http://localhost:8082
+          weight: 1
+          version: v2
+      versioning:
+        strategy: header
+        header-name: X-API-Version
+        percentages:
+          v1: 80
+          v2: 20
+      circuit-breaker:
+        failure-rate-threshold: 50
+        wait-duration-in-open-state-ms: 30000
+        sliding-window-size: 10
+
+    - id: transfer-service
+      path: /api/v1/transfers/**
+      method: "*"
+      load-balancer: weighted
+      required-roles: [OPERATOR, ADMIN, SERVICE]
+      timeout-ms: 45000
+      retries: 3
+      upstreams:
+        - url: http://localhost:8083
+          weight: 5
+        - url: http://localhost:8084
+          weight: 2
+
+    - id: account-service
+      path: /api/v1/accounts/**
+      method: "*"
+      load-balancer: least-connections
+      required-roles: [OPERATOR, ADMIN, SERVICE, VIEWER]
+      timeout-ms: 15000
+      retries: 2
+      upstreams:
+        - url: http://localhost:8085
+        - url: http://localhost:8086
+
+    - id: auth-service
+      path: /api/v1/auth/**
+      method: "*"
+      load-balancer: round-robin
+      timeout-ms: 10000
+      retries: 1
+      upstreams:
+        - url: http://localhost:8089
+
+  metrics:
+    enabled: true
+    path: /gateway/metrics

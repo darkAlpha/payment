@@ -6,125 +6,82 @@ import io.netty.channel.ChannelOption;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.tars.gateway.config.GatewayConfig;
-import org.tars.gateway.feature.FeatureFlagManager;
+import jakarta.annotation.PreDestroy;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
+import org.springframework.stereotype.Component;
+import org.tars.gateway.config.GatewayProperties;
+import org.tars.gateway.feature.FeatureFlagService;
 import org.tars.gateway.filter.GatewayFilter;
-import org.tars.gateway.filter.pre.*;
-import org.tars.gateway.filter.post.AccessLogFilter;
-import org.tars.gateway.proxy.ProxyClient;
+import org.tars.gateway.health.HealthService;
+import org.tars.gateway.metrics.MetricsService;
 import org.tars.gateway.route.RouteRegistry;
-import org.tars.gateway.security.rbac.RbacManager;
-import org.tars.gateway.versioning.VersionRouter;
 
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 
-/**
- * Netty-based API Gateway server.
- * High-performance non-blocking gateway for payment services.
- */
+@Slf4j
+@Component
 public class NettyGatewayServer {
 
-    private static final Logger log = LoggerFactory.getLogger(NettyGatewayServer.class);
+    private final GatewayProperties props;
+    private final List<GatewayFilter> filters;
+    private final RouteRegistry routeRegistry;
+    private final FeatureFlagService featureFlagService;
+    private final MetricsService metricsService;
+    private final HealthService healthService;
 
-    private final GatewayConfig config;
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
     private Channel serverChannel;
-    private ProxyClient proxyClient;
 
-    public NettyGatewayServer(GatewayConfig config) {
-        this.config = config;
+    public NettyGatewayServer(GatewayProperties props,
+                              List<GatewayFilter> filters,
+                              RouteRegistry routeRegistry,
+                              FeatureFlagService featureFlagService,
+                              MetricsService metricsService,
+                              HealthService healthService) {
+        this.props = props;
+        this.filters = filters;
+        this.routeRegistry = routeRegistry;
+        this.featureFlagService = featureFlagService;
+        this.metricsService = metricsService;
+        this.healthService = healthService;
     }
 
-    public void start() throws InterruptedException {
-        int port = config.getServer().getPort();
-        int bossThreads = config.getServer().getBossThreads();
-        int workerThreads = config.getServer().getWorkerThreads();
+    @EventListener(ApplicationReadyEvent.class)
+    public void start() {
+        int port = props.getServer().getPort();
+        bossGroup = new NioEventLoopGroup(props.getServer().getBossThreads());
+        workerGroup = props.getServer().getWorkerThreads() > 0
+                ? new NioEventLoopGroup(props.getServer().getWorkerThreads())
+                : new NioEventLoopGroup();
 
-        bossGroup = new NioEventLoopGroup(bossThreads);
-        workerGroup = workerThreads > 0 ? new NioEventLoopGroup(workerThreads) : new NioEventLoopGroup();
+        new Thread(() -> {
+            try {
+                ServerBootstrap b = new ServerBootstrap();
+                b.group(bossGroup, workerGroup)
+                        .channel(NioServerSocketChannel.class)
+                        .childHandler(new GatewayChannelInitializer(props, filters, routeRegistry,
+                                featureFlagService, metricsService, healthService))
+                        .option(ChannelOption.SO_BACKLOG, 1024)
+                        .childOption(ChannelOption.SO_KEEPALIVE, true)
+                        .childOption(ChannelOption.TCP_NODELAY, true);
 
-        // Initialize components
-        RouteRegistry routeRegistry = new RouteRegistry(config.getRoutes());
-        RbacManager rbacManager = new RbacManager();
-        FeatureFlagManager featureFlagManager = new FeatureFlagManager(config.getFeatureFlags());
-        VersionRouter versionRouter = new VersionRouter();
-        proxyClient = new ProxyClient(30000);
-
-        // Build filter chain
-        List<GatewayFilter> filters = buildFilterChain(rbacManager, featureFlagManager, versionRouter);
-
-        try {
-            ServerBootstrap bootstrap = new ServerBootstrap();
-            bootstrap.group(bossGroup, workerGroup)
-                    .channel(NioServerSocketChannel.class)
-                    .childHandler(new GatewayServerInitializer(
-                            config, routeRegistry, filters, featureFlagManager))
-                    .option(ChannelOption.SO_BACKLOG, 1024)
-                    .childOption(ChannelOption.SO_KEEPALIVE, true)
-                    .childOption(ChannelOption.TCP_NODELAY, true);
-
-            serverChannel = bootstrap.bind(port).sync().channel();
-
-            log.info("╔══════════════════════════════════════════════════════╗");
-            log.info("║    Payment Gateway started on port {}            ║", String.format("%-5d", port));
-            log.info("║    Routes: {}                                       ║", String.format("%-3d", config.getRoutes().size()));
-            log.info("║    Filters: {}                                      ║", String.format("%-3d", filters.size()));
-            log.info("║    Security: JWT={}, ApiKey={}                 ║",
-                    config.getSecurity().getJwt().isEnabled(),
-                    config.getSecurity().getApiKey().isEnabled());
-            log.info("╚══════════════════════════════════════════════════════╝");
-
-            serverChannel.closeFuture().sync();
-        } finally {
-            shutdown();
-        }
+                serverChannel = b.bind(port).sync().channel();
+                log.info("Gateway Netty server started on port {}", port);
+                serverChannel.closeFuture().sync();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }, "gateway-netty").start();
     }
 
+    @PreDestroy
     public void shutdown() {
         log.info("Shutting down gateway server...");
-        if (serverChannel != null) {
-            serverChannel.close();
-        }
-        if (proxyClient != null) {
-            proxyClient.shutdown();
-        }
-        if (bossGroup != null) {
-            bossGroup.shutdownGracefully();
-        }
-        if (workerGroup != null) {
-            workerGroup.shutdownGracefully();
-        }
-        log.info("Gateway server stopped.");
-    }
-
-    private List<GatewayFilter> buildFilterChain(
-            RbacManager rbacManager,
-            FeatureFlagManager featureFlagManager,
-            VersionRouter versionRouter) {
-
-        List<GatewayFilter> filters = new ArrayList<>();
-
-        // Pre-filters (ordered by priority)
-        filters.add(new AccessLogFilter(config.getServer().isEnableAccessLog()));
-        filters.add(new CorsFilter(config.getSecurity().getCors()));
-        filters.add(new RequestIdFilter());
-        filters.add(new RateLimitFilter(config.getRateLimit()));
-        filters.add(new AuthenticationFilter(config.getSecurity()));
-        filters.add(new AuthorizationFilter(rbacManager));
-        filters.add(new FeatureFlagFilter(featureFlagManager));
-        filters.add(new RouteResolveFilter(versionRouter));
-        filters.add(new ProxyFilter(proxyClient));
-
-        // Sort by order
-        filters.sort(Comparator.comparingInt(GatewayFilter::order));
-
-        log.info("Filter chain built: {}", filters.stream().map(GatewayFilter::name).toList());
-        return filters;
+        if (serverChannel != null) serverChannel.close();
+        if (bossGroup != null) bossGroup.shutdownGracefully();
+        if (workerGroup != null) workerGroup.shutdownGracefully();
     }
 }
-

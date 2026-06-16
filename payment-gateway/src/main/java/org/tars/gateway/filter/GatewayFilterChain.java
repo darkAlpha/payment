@@ -7,43 +7,35 @@ import org.tars.gateway.context.GatewayContext;
 import java.util.List;
 
 /**
- * Executes filters in order, allowing each filter to halt processing.
+ * Executes an ordered list of filters as a chain (Chain of Responsibility).
+ * Stops execution if context is aborted.
  */
 public class GatewayFilterChain {
 
     private static final Logger log = LoggerFactory.getLogger(GatewayFilterChain.class);
 
     private final List<GatewayFilter> filters;
-    private int currentIndex = 0;
+    private int index;
 
     public GatewayFilterChain(List<GatewayFilter> filters) {
         this.filters = filters;
     }
 
-    /**
-     * Proceed to the next filter in the chain.
-     */
     public void next(GatewayContext context) {
         if (context.isAborted()) {
-            log.debug("Request {} aborted at filter index {}: {}",
-                    context.getRequestId(), currentIndex - 1, context.getAbortReason());
+            log.debug("[{}] Chain aborted: {}", context.getRequestId(), context.getAbortReason());
             return;
         }
-
-        if (currentIndex >= filters.size()) {
-            return; // All filters executed
+        if (index >= filters.size()) {
+            return;
         }
-
-        GatewayFilter filter = filters.get(currentIndex++);
-        log.trace("Executing filter: {} (order={})", filter.name(), filter.order());
+        GatewayFilter filter = filters.get(index++);
+        log.trace("[{}] Executing filter: {}", context.getRequestId(), filter.getName());
         filter.filter(context, this);
     }
 
-    /**
-     * Start chain execution from the beginning.
-     */
     public void execute(GatewayContext context) {
-        this.currentIndex = 0;
+        this.index = 0;
         next(context);
     }
 }
